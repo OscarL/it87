@@ -3,7 +3,7 @@
 NAME= it87
 TYPE= DRIVER
 
-SRCS= it87_driver.c
+SRCS= it87.cpp
 RSRCS= 
 
 LIBS=
@@ -22,5 +22,3 @@ DRIVER_PATH = misc
 
 ## include the makefile-engine
 include $(BUILDHOME)/etc/makefile-engine
-
-CFLAGS := $(filter-out -Wno-ctor-dtor-privacy,$(CFLAGS))
