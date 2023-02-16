@@ -1,5 +1,5 @@
 //
-// Copyright 2003-2006, 2022-2023, Oscar Lesta <oscar.lesta@gmail.com>. All right reserved.
+// Copyright 2003-2006, 2022-2023, Oscar Lesta. All right reserved.
 // Distributed under the terms of the MIT License.
 //
 // A simple device driver for the ITE IT8705 (and compatibles) sensor chips.
@@ -23,6 +23,7 @@
 #else
 #	define TRACE(x...)
 #endif
+#define INFO(x...)	dprintf("it87: " x)
 #define ERROR(x...)	dprintf("it87: " x)
 
 #define IT87_ADDRESS_REG	(gBaseAddress + IT87_ADDR_PORT_OFFSET)
@@ -35,7 +36,7 @@ int32 api_version = B_CUR_DRIVER_API_VERSION;
 
 static isa_module_info* gISA;
 
-static uint8 gChipID = 0;
+static uint16 gChipID = 0;
 static uint16 gBaseAddress = 0;	// default ISA base address 0x290
 
 //-----------------------------------------------------------------------------
@@ -80,18 +81,23 @@ exit_mb_pnp_mode(void)
 static bool
 is_it87xx_present(void)
 {
-	uint8 chip_id = 0x0;
+	uint16 chip_id = 0x0000;
 	bool chip_found = false;
 
 	enter_mb_pnp_mode();
 
-	chip_id = read_indexed(0x2E, 0x20);
-	if (chip_id == 0x87) {
-		chip_id = read_indexed(0x2E, 0x21);
-		if (chip_id == 0x05 || chip_id == 0x12 || chip_id == 0x16 || chip_id == 0x18) {
+	chip_id = (read_indexed(0x2E, 0x20) << 8) | read_indexed(0x2E, 0x21);
+	switch (chip_id) {
+		case 0x8705:
+		case 0x8712:
+		case 0x8718:
+		case 0x8720:
+		case 0x8721:
+		case 0x8726:
+		case 0x8728:
+		case 0x8772:
 			chip_found = true;	// an ITE IT87xx was found.
 			gChipID = chip_id;	// Save the Chip ID for future use.
-		}
 	}
 
 	exit_mb_pnp_mode();
@@ -256,11 +262,6 @@ device_read(void* cookie, off_t position, void* data, size_t* num_bytes)
 	enter_mb_pnp_mode();
 	it87_config(true);
 
-	OutInt(data, num_bytes, "CHIP_ID: IT87%2x", gChipID);
-	OutInt(data, num_bytes, " - VENDOR_ID: 0x%2x", ITESensorReadValue(IT87_REG_ITE_VENDOR_ID));
-	OutInt(data, num_bytes, " - CORE_ID: 0x%2x", ITESensorReadValue(IT87_REG_CORE_ID));
-	OutInt(data, num_bytes, " - Base Address: 0x%04X\n", gBaseAddress);
-
 	v = ITESensorReadValue(IT87_REG_VIN0) * 16;
 	myprintf(data, num_bytes, "VIN0 : %3d.%03d\n", (v/1000), (v%1000));
 
@@ -405,7 +406,11 @@ init_driver(void)
 	if (gBaseAddress == 0)
 		return ENOSYS;
 
-	TRACE("device found at address = 0x%04x.", gBaseAddress);
+	uint8 vendor_id = ITESensorReadValue(IT87_REG_ITE_VENDOR_ID);
+	uint8 core_id = ITESensorReadValue(IT87_REG_CORE_ID);
+
+	INFO("ITE%4x found at address = 0x%04x.", gChipID, gBaseAddress);
+	INFO("\tVENDOR_ID: 0x%2x - CORE_ID: 0x%2x", vendor_id, core_id);
 
 	// Put the Fan Divisor into a known state. Only affects FAN_TAC1 and FAN_TAC2
 //	ITESensorWrite(IT87_REG_FAN_DIV, IT87_FANDIV);
@@ -425,7 +430,7 @@ const char**
 publish_devices()
 {
 	static const char* names[] = {
-		"misc/" IT87_SENSOR_DEVICE_NAME,
+		"sensor/" IT87_SENSOR_DEVICE_NAME,
 		NULL
 	};
 	return names;

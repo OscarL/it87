@@ -4,19 +4,23 @@ A Haiku driver for the "Environmental Controller" (EC) part of the ITE IT87xx "S
 
 The EC manages temperature, voltages and fan speed sensors (and fan control, but that's not supported).
 
-Tested on Super I/O chips:
-
-    - IT8718F
-
-*Might* still work on:
+*Might* work on the following Super I/O chips:
 
     - IT8705F / SiS 950
+    - IT8712F
+    - IT8716
+    - IT8718F	Note: This one works (at least for me).
+    - IT8720
+    - IT8721
+    - IT8726
+    - IT8728
+    - IT8772
 
 ## Install instructions:
 
 - Clone repo
 - `make && make driverinstall`
-- `cat /dev/misc/it87`
+- `cat /dev/sensor/it87`
 
 If not, `tail -f /var/log/syslog` should at least show if something went wrong, like:
 
@@ -32,7 +36,11 @@ It was never published because I'm awful at C/C++ (or programming in general, yo
 
 Then it was lost to some HDD troubles, or so I thought. I kept an image of the borked partition, and... after many failed attemps in different points in time, I finally managed to recover something I could work on.
 
-Now (2022-2023), it works for the IT8718F on my Biostar A760G-M2. Hopefully support for most of the rest of IT87xx chips will follow someday?.
+After some massaging (in 2022), it started to work under Haiku for the IT8718F on my Biostar A760G-M2 motherboard.
+
+Now in 2023... after 20 years, I guess it is time to release it to the public :-)
+
+Will need others to confirm if it works for the rest of the supported chips.
 
 ## License
 

@@ -23,8 +23,17 @@ enum it87_const {
 };
 
 
-// Internal Registers of the IT87xx
-enum it87_registers {
+// Global Registers of the IT87xx
+enum it87_global_registers {
+	IT87_CONFIG_CTRL = 0x02,
+	IT87_LDN = 0x07,
+	IT87_CHIP_ID_1 = 0x20,
+	IT87_CHIP_ID_2 = 0x20,
+	IT87_CONFIG_SELECT_CHIP_VER = 0x22,
+};
+
+// Environmental Controller (EC) Registers
+enum it87_ec_registers {
 	IT87_REG_CONFIG			= 0x00,
 	IT87_REG_INT_STATUS1	= 0x01,
 	IT87_REG_INT_STATUS2	= 0x02,
