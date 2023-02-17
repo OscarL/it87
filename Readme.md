@@ -9,7 +9,7 @@ The EC manages temperature, voltages and fan speed sensors (and fan control, but
     - IT8705F / SiS 950
     - IT8712F
     - IT8716
-    - IT8718F	Note: This one works (at least for me).
+    - IT8718F	Note: This one (mostly) works, at least for me.
     - IT8720
     - IT8721
     - IT8726
@@ -20,15 +20,50 @@ The EC manages temperature, voltages and fan speed sensors (and fan control, but
 
 - Clone repo
 - `make && make driverinstall`
-- `cat /dev/sensor/it87`
 
-If not, `tail -f /var/log/syslog` should at least show if something went wrong, like:
+Then, using `cat /dev/sensor/it87` should give some output like this:
+
+```sh
+> cat /dev/sensor/it87 
+VIN0 :   1.280 V
+VIN1 :   1.136 V
+VIN2 :   3.376 V
+VIN3 :   5.026 V
+VIN4 :  12.160 V
+VIN5 :   1.968 V
+VIN6 :   1.168 V
+VIN7 :   4.838 V
+VBAT :   3.328 V
+TEMP0: -178 °C
+TEMP1:  22 °C
+TEMP2:  36 °C
+FAN1 : 4500 RPM
+FAN2 : 32142 RPM
+FAN3 :    0 RPM
+[~/Desktop ]
+```
+
+If not (and if `TRACE_IT87` is defined) , `tail -f /var/log/syslog` should at least show if something went wrong, like:
 
 > KERN: it87: device not found.
 
+## Notes:
+
+Voltage readings should be more or less accurate, with the possible exception of VIN5/VIN6, if your motherboard uses those to monitor -12 and -5 volts.
+
+Fan RPMs will be most likely wrong for newer chips (I need to add support for 16 bits tachometers yet).
+
+Temps seem OK to me, with the exception of TEMP0, that seems not connected.
+
+## ToDo:
+
+- 16-bits tachometers for FANs.
+- An `it87_sensors_data` struct that holds sensor's names?
+- Update [Hardmony](https://github.com/OscarL/Hardmony) to use ioctl calls instead of parsing the text output.
+
 ## History
 
-Aparently, I've started working on this in mid 2003 (on BeOS R5 PE), and last changes were made to it in late 2006.
+Apparently, I've started working on this in mid 2003 (on BeOS R5 PE), and last changes were made to it in late 2006.
 
 Originally only worked for the IT8705F (and the SiS 950 clone) "Super I/O" chip of a PC-Chips M810-LR motherboard (Athlon K7 @ 900 MHz).
 
