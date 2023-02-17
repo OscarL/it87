@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "it87_regs.h"
 #include "it87.h"
 
 //-----------------------------------------------------------------------------
@@ -25,6 +26,8 @@
 #endif
 #define INFO(x...)	dprintf("it87: " x)
 #define ERROR(x...)	dprintf("it87: " x)
+
+#define IT87_SENSOR_DEVICE_NAME		"it87"
 
 #define IT87_ADDRESS_REG	(gBaseAddress + IT87_ADDR_PORT_OFFSET)
 #define IT87_DATA_REG		(gBaseAddress + IT87_DATA_PORT_OFFSET)
@@ -42,7 +45,7 @@ static uint16 gBaseAddress = 0;	// default ISA base address 0x290
 //-----------------------------------------------------------------------------
 //	#pragma mark - Hardware I/O
 
-static uint8
+static inline uint8
 read_indexed(uint16 port, uint8 reg)
 {
 	gISA->write_io_8(port, reg);
@@ -50,7 +53,7 @@ read_indexed(uint16 port, uint8 reg)
 }
 
 
-static void
+static inline void
 write_indexed(uint16 port, uint8 reg, uint8 value)
 {
 	gISA->write_io_8(port, reg);
@@ -58,7 +61,7 @@ write_indexed(uint16 port, uint8 reg, uint8 value)
 }
 
 
-static void
+static inline void
 enter_mb_pnp_mode(void)
 {
 	// Write 0x87, 0x01, 0x55, 0x55 to register 0x2E to enter MB PnP Mode.
@@ -69,7 +72,7 @@ enter_mb_pnp_mode(void)
 }
 
 
-static void
+static inline void
 exit_mb_pnp_mode(void)
 {
 	//---- Set bit 1 to 1 in register at index 0x2 to leave MB PnP Mode.
@@ -127,7 +130,7 @@ find_isa_port_address(void)
 	return port;
 }
 
-
+/*
 int set_bit(int n, int k)
 {
 	return (n | (1 << k));
@@ -144,7 +147,7 @@ int toggle_bit(int n, int k)
 {
 	return (n ^ (1 << k));
 }
-
+*/
 
 static inline void
 it87_config(bool enable)
@@ -194,6 +197,13 @@ ITESensorReadValue(int regNum)
 //	#pragma mark - utils funcs
 
 static inline int
+TwosComplement(uint8 value)
+{
+	return (value & 1 << 7) ? (~(unsigned)value) + 1 : value;
+}
+
+
+static inline int
 CountToRPM(uint8 count)
 {
 	if (count == 255)
@@ -213,12 +223,50 @@ OutInt(void* buff, size_t* len, const char format[], int value)
 
 
 static void
-myprintf(void* buff, size_t* len, const char format[], uint8 val1, uint8 val2)
+OutFloat(void* buffer, size_t* numBytes, const char format[], uint value, uint scale)
 {
-	sprintf((char*) buff + *len, format, val1, val2);
-	*len = strlen((char*) buff);
+	char* str = (char*) buffer + *numBytes;
+	sprintf(str, format, (value / scale), (value % scale));
+	*numBytes = strlen((char*) buffer);
 }
 
+
+static void
+it87_refresh(it87_sensors_data& data)
+{
+	// IT87-compatible chips ADC are 8-bits, with a range of 0 to 4096 mV
+	// So... resolution is 16 mV.
+	// See "Table 4-1. Analog to Digital Table for Monitoring Voltage" on "IT8705F PG ec v03.pdf"
+	#define ADC_RES		16
+
+	enter_mb_pnp_mode();
+	it87_config(true);
+
+	data.voltages[0] = ITESensorReadValue(IT87_REG_VIN0) * ADC_RES;
+	data.voltages[1] = ITESensorReadValue(IT87_REG_VIN1) * ADC_RES;
+	data.voltages[2] = ITESensorReadValue(IT87_REG_VIN2) * ADC_RES;
+	data.voltages[3] = ITESensorReadValue(IT87_REG_VIN3) * ADC_RES * 1.68;	// +5V. (6854.4 mV / 255)
+	data.voltages[4] = ITESensorReadValue(IT87_REG_VIN4) * ADC_RES * 4; 	// +12V. (16320 mV / 255)
+	// This can either be -12V, or RAM Voltage
+	data.voltages[5] = ITESensorReadValue(IT87_REG_VIN5) * ADC_RES;
+	// This can either be -5V, or HT Voltage
+	data.voltages[6] = ITESensorReadValue(IT87_REG_VIN6) * ADC_RES;
+	data.voltages[7] = ITESensorReadValue(IT87_REG_VIN7) * ADC_RES * 1.68;	// +5V SB
+	data.voltages[8] = ITESensorReadValue(IT87_REG_VBAT) * ADC_RES;
+
+	data.temps[0] = TwosComplement(ITESensorReadValue(IT87_REG_TEMP0));
+	data.temps[1] = TwosComplement(ITESensorReadValue(IT87_REG_TEMP1));
+	data.temps[2] = TwosComplement(ITESensorReadValue(IT87_REG_TEMP2));
+
+	// This works for older chips (8-bit tachometers).
+	// ToDo: fix this for thw 16-bits tachometers of the newer chips.
+	data.fans[0] = ITESensorReadValue(IT87_REG_FAN_1);
+	data.fans[1] = ITESensorReadValue(IT87_REG_FAN_2);
+	data.fans[2] = ITESensorReadValue(IT87_REG_FAN_3);
+
+	it87_config(false);
+	exit_mb_pnp_mode();
+}
 
 //-----------------------------------------------------------------------------
 //	#pragma mark - Device Hooks
@@ -245,9 +293,33 @@ device_free(void* cookie)
 }
 
 
-// Text Interface.
 static status_t
-device_read(void* cookie, off_t position, void* data, size_t* num_bytes)
+device_control(void* cookie, uint32 operation, void* args, size_t length)
+{
+	switch (operation) {
+		case IT87_SENSORS_READ:
+		{
+			it87_sensors_data data;
+			if (user_memcpy(&data, args, sizeof(it87_sensors_data)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			it87_refresh(data);
+
+			if (user_memcpy(args, &data, sizeof(it87_sensors_data)) != B_OK)
+				return B_BAD_ADDRESS;
+
+			return B_OK;
+		}
+	}
+
+	return B_BAD_VALUE;	// B_DEV_INVALID_IOCTL?
+}
+
+
+// Text Interface.
+
+static status_t
+device_read(void* cookie, off_t position, void* buffer, size_t* num_bytes)
 {
 	if (*num_bytes < 1)
 		return B_IO_ERROR;
@@ -257,49 +329,34 @@ device_read(void* cookie, off_t position, void* data, size_t* num_bytes)
 		return B_OK;
 	}
 
-	int v;
+	*num_bytes = 0;
 
-	enter_mb_pnp_mode();
-	it87_config(true);
+	it87_sensors_data data;
+/*
+	status_t status = device_control(cookie, IT87_SENSORS_READ, &data, 0);
+	if (status != B_OK)
+		return status;
+*/
+	it87_refresh(data);
 
-	v = ITESensorReadValue(IT87_REG_VIN0) * 16;
-	myprintf(data, num_bytes, "VIN0 : %3d.%03d\n", (v/1000), (v%1000));
+	OutFloat(buffer, num_bytes, "VIN0 : %3d.%03d V\n", data.voltages[0], 1000);
+	OutFloat(buffer, num_bytes, "VIN1 : %3d.%03d V\n", data.voltages[1], 1000);
+	OutFloat(buffer, num_bytes, "VIN2 : %3d.%03d V\n", data.voltages[2], 1000);
+	OutFloat(buffer, num_bytes, "VIN3 : %3d.%03d V\n", data.voltages[3], 1000);
+	OutFloat(buffer, num_bytes, "VIN4 : %3d.%03d V\n", data.voltages[4], 1000);
+	OutFloat(buffer, num_bytes, "VIN5 : %3d.%03d V\n", data.voltages[5], 1000);
+	OutFloat(buffer, num_bytes, "VIN6 : %3d.%03d V\n", data.voltages[6], 1000);
+	OutFloat(buffer, num_bytes, "VIN7 : %3d.%03d V\n", data.voltages[7], 1000);
+	OutFloat(buffer, num_bytes, "VBAT : %3d.%03d V\n", data.voltages[8], 1000);
 
-	v = ITESensorReadValue(IT87_REG_VIN1) * 16;
-	myprintf(data, num_bytes, "VIN1 : %3d.%03d\n", (v/1000), (v%1000));
+	OutInt(buffer, num_bytes, "TEMP0: %3d °C\n", data.temps[0]);
+	OutInt(buffer, num_bytes, "TEMP1: %3d °C\n", data.temps[1]);
+	OutInt(buffer, num_bytes, "TEMP2: %3d °C\n", data.temps[2]);
 
-	v = ITESensorReadValue(IT87_REG_VIN2) * 16;
-	myprintf(data, num_bytes, "VIN2 : %3d.%03d\n", (v/1000), (v%1000));
+	OutInt(buffer, num_bytes, "FAN1 : %4d RPM\n", CountToRPM(data.fans[0]));
+	OutInt(buffer, num_bytes, "FAN2 : %4d RPM\n", CountToRPM(data.fans[1]));
+	OutInt(buffer, num_bytes, "FAN3 : %4d RPM\n", CountToRPM(data.fans[2]));
 
-	v = ITESensorReadValue(IT87_REG_VIN3) * 16;
-	myprintf(data, num_bytes, "VIN3 : %3d.%03d\n", (v/1000), (v%1000));
-
-	v = ITESensorReadValue(IT87_REG_VIN4) * 16 * 4; // +12 V
-	myprintf(data, num_bytes, "VIN4 : %3d.%03d\n", (v/1000), (v%1000));
-
-	v = ITESensorReadValue(IT87_REG_VIN5) * 16; // -12 V
-	myprintf(data, num_bytes, "VIN5 : %2d.%03d\n", (v/1000), (v%1000));
-
-	v = ITESensorReadValue(IT87_REG_VIN6) * 16 * 3; // SB 3V
-	myprintf(data, num_bytes, "VIN6 : %3d.%03d\n", (v/1000), (v%1000));
-
-	v = ITESensorReadValue(IT87_REG_VIN7) * 16; // SB 5V
-	myprintf(data, num_bytes, "VIN7 : %3d.%03d\n", (v/1000), (v%1000));
-
-	v = ITESensorReadValue(IT87_REG_VBAT) * 16;
-	myprintf(data, num_bytes, "VBAT : %3d.%03d\n", (v/1000), (v%1000));
-
-	OutInt(data, num_bytes, "TEMP0: %3d\n", ITESensorReadValue(IT87_REG_TEMP0));
-	OutInt(data, num_bytes, "TEMP1: %3d\n", ITESensorReadValue(IT87_REG_TEMP1));
-	OutInt(data, num_bytes, "TEMP2: %3d\n", ITESensorReadValue(IT87_REG_TEMP2));
-
-	OutInt(data, num_bytes, "FAN1 : %4d\n", CountToRPM(ITESensorReadValue(IT87_REG_FAN_1)));
-	OutInt(data, num_bytes, "FAN2 : %4d\n", CountToRPM(ITESensorReadValue(IT87_REG_FAN_2)));
-	OutInt(data, num_bytes, "FAN3 : %4d\n", CountToRPM(ITESensorReadValue(IT87_REG_FAN_3)));
-
-	it87_config(false);
-	exit_mb_pnp_mode();
- 
 	return B_OK;
 }
 
@@ -309,69 +366,6 @@ device_write(void* cookie, off_t pos, const void* data, size_t* num_bytes)
 {
 	*num_bytes = 0;
 	return B_NOT_ALLOWED;
-}
-
-
-static status_t
-device_control(void* cookie, uint32 operation, void* args, size_t length)
-{
-	switch (operation)
-	{
-/*
-		case HW_SENSOR_READ:
-		{
-			status_t result;
-			hw_sensor_io_args* ioctl = (hw_sensor_io_args*) args;
-			if (ioctl->signature != IT87_SENSOR_SIGNATURE)
-				return B_BAD_VALUE;
-
-			result = B_OK;
-			switch (ioctl->size) {
-				case 1:	ioctl->value = gISA->read_io_8(ioctl->port);		break;
-				case 2:	ioctl->value = gISA->read_io_16(ioctl->port);	break;
-				case 4:	ioctl->value = gISA->read_io_32(ioctl->port);	break;
-				default:
-					result = B_BAD_VALUE;
-			}
-
-			return result;
-		}
-
-		case HW_SENSOR_WRITE:
-		{
-
-			status_t result;
-			hw_sensor_io_args* ioctl = (hw_sensor_io_args*) arg;
-			if (ioctl->signature != IT87_SENSOR_SIGNATURE)
-				return B_BAD_VALUE;
-
-			result = B_OK;
-			switch (ioctl->size) {
-				case 1:	gISA->write_io_8(ioctl->port, ioctl->value);		break;
-				case 2:	gISA->write_io_16(ioctl->port, ioctl->value);	break;
-				case 4:	gISA->write_io_32(ioctl->port, ioctl->value);	break;
-				default:
-					result = B_BAD_VALUE;
-			}
-
-			return result;
-		}
-
-		case HW_SENSOR_GET_INFO:
-		{
-
-			hw_sensor_info_args* ioctl = (hw_sensor_info_args*) arg;
-			if (ioctl->signature != IT87_SENSOR_SIGNATURE)
-				return B_BAD_VALUE;
-
-			ioctl->status = pci->get_nth_pci_info(ioctl->index, ioctl->info);
-
-			return B_OK;
-		}
-*/
-	}
-
-	return B_BAD_VALUE;	// B_DEV_INVALID_IOCTL?
 }
 
 
@@ -408,12 +402,13 @@ init_driver(void)
 
 	uint8 vendor_id = ITESensorReadValue(IT87_REG_ITE_VENDOR_ID);
 	uint8 core_id = ITESensorReadValue(IT87_REG_CORE_ID);
+	uint8 rev_id = ITESensorReadValue(IT87_CONFIG_SELECT_CHIP_VER);
 
-	INFO("ITE%4x found at address = 0x%04x.", gChipID, gBaseAddress);
-	INFO("\tVENDOR_ID: 0x%2x - CORE_ID: 0x%2x", vendor_id, core_id);
+	INFO("ITE%4x found at address = 0x%04x.\n", gChipID, gBaseAddress);
+	INFO("\tVENDOR_ID: 0x%2x - CORE_ID: 0x%2x - REV: 0x%2x\n", vendor_id, core_id, rev_id);
 
 	// Put the Fan Divisor into a known state. Only affects FAN_TAC1 and FAN_TAC2
-//	ITESensorWrite(IT87_REG_FAN_DIV, IT87_FANDIV);
+	//ITESensorWrite(IT87_REG_FAN_DIV, IT87_FANDIV);
 
 	return B_OK;
 }
