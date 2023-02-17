@@ -402,10 +402,10 @@ init_driver(void)
 
 	uint8 vendor_id = ITESensorReadValue(IT87_REG_ITE_VENDOR_ID);
 	uint8 core_id = ITESensorReadValue(IT87_REG_CORE_ID);
-	uint8 rev_id = ITESensorReadValue(IT87_CONFIG_SELECT_CHIP_VER);
+	uint8 rev_id = ITESensorReadValue(IT87_CONFIG_SELECT_CHIP_VER) & 0xF;
 
 	INFO("ITE%4x found at address = 0x%04x.\n", gChipID, gBaseAddress);
-	INFO("\tVENDOR_ID: 0x%2x - CORE_ID: 0x%2x - REV: 0x%2x\n", vendor_id, core_id, rev_id);
+	INFO("\tVENDOR_ID: 0x%02x - CORE_ID: 0x%02x - REV: 0x%02x\n", vendor_id, core_id, rev_id);
 
 	// Put the Fan Divisor into a known state. Only affects FAN_TAC1 and FAN_TAC2
 	//ITESensorWrite(IT87_REG_FAN_DIV, IT87_FANDIV);
