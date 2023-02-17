@@ -47,6 +47,15 @@ If not (and if `TRACE_IT87` is defined) , `tail -f /var/log/syslog` should at le
 
 > KERN: it87: device not found.
 
+or something like:
+
+```
+KERN: it87: ITE8718 found at address = 0x0e80.
+KERN: it87:     VENDOR_ID: 0x90 - CORE_ID: 0x12 - REV: 0x03
+```
+
+if it could find a supported chip at least.
+
 ## Notes:
 
 Voltage readings should be more or less accurate, with the possible exception of VIN5/VIN6, if your motherboard uses those to monitor -12 and -5 volts.
