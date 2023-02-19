@@ -81,15 +81,14 @@ exit_mb_pnp_mode(void)
 }
 
 
-static bool
-is_it87xx_present(void)
+static uint16
+it87xx_detect(void)
 {
-	uint16 chip_id = 0x0000;
-	bool chip_found = false;
+	uint16 result = 0x0000; // Return this if we don't find a supported ITE chip.
 
 	enter_mb_pnp_mode();
 
-	chip_id = (read_indexed(0x2E, 0x20) << 8) | read_indexed(0x2E, 0x21);
+	uint16 chip_id = (read_indexed(0x2E, 0x20) << 8) | read_indexed(0x2E, 0x21);
 	switch (chip_id) {
 		case 0x8705:
 		case 0x8712:
@@ -99,13 +98,12 @@ is_it87xx_present(void)
 		case 0x8726:
 		case 0x8728:
 		case 0x8772:
-			chip_found = true;	// an ITE IT87xx was found.
-			gChipID = chip_id;	// Save the Chip ID for future use.
+			result = chip_id;	// an ITE IT87xx was found.
 	}
 
 	exit_mb_pnp_mode();
 
-	return chip_found;
+	return result;
 }
 
 
@@ -213,6 +211,14 @@ CountToRPM(uint8 count)
 	return 1350000 / (count * 2);
 }
 
+static inline int
+Count16ToRPM(uint16 count)
+{
+	if (count == 0 || count == 255 || count == 0xffff)
+		return 0;
+	return 675000 / count;
+}
+
 
 static void
 OutInt(void* buff, size_t* len, const char format[], int value)
@@ -258,11 +264,23 @@ it87_refresh(it87_sensors_data& data)
 	data.temps[1] = TwosComplement(ITESensorReadValue(IT87_REG_TEMP1));
 	data.temps[2] = TwosComplement(ITESensorReadValue(IT87_REG_TEMP2));
 
-	// This works for older chips (8-bit tachometers).
-	// ToDo: fix this for thw 16-bits tachometers of the newer chips.
-	data.fans[0] = ITESensorReadValue(IT87_REG_FAN_1);
-	data.fans[1] = ITESensorReadValue(IT87_REG_FAN_2);
-	data.fans[2] = ITESensorReadValue(IT87_REG_FAN_3);
+	if (gChipID == 0x8705 || gChipID == 0x8712) {
+		// Older chips (8-bit tachometers):
+		data.fans[0] = CountToRPM(ITESensorReadValue(IT87_REG_FAN_1));
+		data.fans[1] = CountToRPM(ITESensorReadValue(IT87_REG_FAN_2));
+		data.fans[2] = CountToRPM(ITESensorReadValue(IT87_REG_FAN_3));
+	} else {
+		data.fans[0] = Count16ToRPM(
+			ITESensorRead(IT87_REG_FAN_1) | ITESensorRead(IT87_REG_FAN_1_EXT) << 8);
+		data.fans[1] = Count16ToRPM(
+			ITESensorRead(IT87_REG_FAN_2) | ITESensorRead(IT87_REG_FAN_2_EXT) << 8);
+		data.fans[2] = Count16ToRPM(
+			ITESensorRead(IT87_REG_FAN_3) | ITESensorRead(IT87_REG_FAN_3_EXT) << 8);
+		data.fans[3] = Count16ToRPM(
+			ITESensorRead(IT87_REG_FAN_4_LSB) | ITESensorRead(IT87_REG_FAN_4_MSB) << 8);
+		data.fans[4] = Count16ToRPM(
+			ITESensorRead(IT87_REG_FAN_5_LSB) | ITESensorRead(IT87_REG_FAN_5_MSB) << 8);
+	}
 
 	it87_config(false);
 	exit_mb_pnp_mode();
@@ -349,13 +367,18 @@ device_read(void* cookie, off_t position, void* buffer, size_t* num_bytes)
 	OutFloat(buffer, num_bytes, "VIN7 : %3d.%03d V\n", data.voltages[7], 1000);
 	OutFloat(buffer, num_bytes, "VBAT : %3d.%03d V\n", data.voltages[8], 1000);
 
-	OutInt(buffer, num_bytes, "TEMP0: %3d °C\n", data.temps[0]);
-	OutInt(buffer, num_bytes, "TEMP1: %3d °C\n", data.temps[1]);
-	OutInt(buffer, num_bytes, "TEMP2: %3d °C\n", data.temps[2]);
+	OutInt(buffer, num_bytes, "TEMP0: %4d °C\n", data.temps[0]);
+	OutInt(buffer, num_bytes, "TEMP1: %4d °C\n", data.temps[1]);
+	OutInt(buffer, num_bytes, "TEMP2: %4d °C\n", data.temps[2]);
 
-	OutInt(buffer, num_bytes, "FAN1 : %4d RPM\n", CountToRPM(data.fans[0]));
-	OutInt(buffer, num_bytes, "FAN2 : %4d RPM\n", CountToRPM(data.fans[1]));
-	OutInt(buffer, num_bytes, "FAN3 : %4d RPM\n", CountToRPM(data.fans[2]));
+	OutInt(buffer, num_bytes, "FAN1 : %4d RPM\n", data.fans[0]);
+	OutInt(buffer, num_bytes, "FAN2 : %4d RPM\n", data.fans[1]);
+	OutInt(buffer, num_bytes, "FAN3 : %4d RPM\n", data.fans[2]);
+
+	if (gChipID != 0x8705 && gChipID != 0x8712) {
+		OutInt(buffer, num_bytes, "FAN4 : %4d RPM\n", data.fans[3]);
+		OutInt(buffer, num_bytes, "FAN5 : %4d RPM\n", data.fans[4]);
+	}
 
 	return B_OK;
 }
@@ -378,7 +401,8 @@ init_hardware(void)
 	if (get_module(B_ISA_MODULE_NAME, (module_info**) &gISA) < 0)
 		return ENOSYS;
 
-	if (!is_it87xx_present()) {
+	gChipID = it87xx_detect();
+	if (gChipID == 0x0000) {
 		TRACE("device not found.");
 		return B_DEVICE_NOT_FOUND;	// ENODEV
 	}
@@ -400,15 +424,18 @@ init_driver(void)
 	if (gBaseAddress == 0)
 		return ENOSYS;
 
-	uint8 vendor_id = ITESensorReadValue(IT87_REG_ITE_VENDOR_ID);
-	uint8 core_id = ITESensorReadValue(IT87_REG_CORE_ID);
-	uint8 rev_id = ITESensorReadValue(IT87_CONFIG_SELECT_CHIP_VER) & 0xF;
+	uint8 vendor_id = ITESensorRead(IT87_REG_ITE_VENDOR_ID);
+	uint8 core_id = ITESensorRead(IT87_REG_CORE_ID);
+	uint8 rev_id = ITESensorRead(IT87_CONFIG_SELECT_CHIP_VER) & 0xF;
 
-	INFO("ITE%4x found at address = 0x%04x.\n", gChipID, gBaseAddress);
-	INFO("\tVENDOR_ID: 0x%02x - CORE_ID: 0x%02x - REV: 0x%02x\n", vendor_id, core_id, rev_id);
+	INFO("ITE%4x found at address = 0x%04x. VENDOR_ID: 0x%02x - CORE_ID: 0x%02x - REV: 0x%02x\n",
+		gChipID, gBaseAddress, vendor_id, core_id, rev_id);
 
-	// Put the Fan Divisor into a known state. Only affects FAN_TAC1 and FAN_TAC2
-	//ITESensorWrite(IT87_REG_FAN_DIV, IT87_FANDIV);
+	// Enable 16-bits tachometers on chips that have them.
+	if (gChipID != 0x8705 && gChipID != 0x8712) {
+		uint8 counter_enable_reg = ITESensorRead(IT87_REG_FAN_16BITS);
+		ITESensorWrite(IT87_REG_FAN_16BITS, counter_enable_reg | 0x7); // set bits 2-0 bits to 1
+	}
 
 	return B_OK;
 }
