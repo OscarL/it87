@@ -14,7 +14,12 @@ The EC manages temperature, voltages and fan speed sensors (and fan control, but
     - IT8721
     - IT8726
     - IT8728
+    - IT8771
     - IT8772
+
+    - IT8625
+    - IT8628
+    - IT8655
 
 ## Install instructions:
 
@@ -89,3 +94,15 @@ Will need others to confirm if it works for the rest of the supported chips.
 ## License
 
 MIT.
+
+### Similar drivers in other OSes:
+
+- Linux's [it87.c](https://github.com/torvalds/linux/blob/master/drivers/hwmon/it87.c)
+- NetBSD's [itesio_isa.c](https://github.com/NetBSD/src/blob/trunk/sys/dev/isa/itesio_isa.c) / [itesio_isavar.h](https://github.com/NetBSD/src/blob/trunk/sys/dev/isa/itesio_isavar.h)
+- OpenBSD's [it.c](https://github.com/openbsd/src/blob/master/sys/dev/isa/it.c) / [itvar.h](https://github.com/openbsd/src/blob/master/sys/dev/isa/itvar.h)
+
+Only watchdog support?:
+
+- FreeBSD's [superio.c](https://github.com/freebsd/freebsd-src/blob/master/sys/dev/superio/superio.c)
+	+ [itwd.c](https://github.com/freebsd/freebsd-src/blob/master/sys/dev/itwd/itwd.c)
+	(and similar for:  [wbwd.c](https://github.com/freebsd/freebsd-src/blob/master/sys/dev/wbwd/wbwd.c))

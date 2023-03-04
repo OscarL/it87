@@ -90,6 +90,10 @@ it87xx_detect(void)
 
 	uint16 chip_id = (read_indexed(0x2E, 0x20) << 8) | read_indexed(0x2E, 0x21);
 	switch (chip_id) {
+		case 0x8625:
+		case 0x8628:
+		case 0x8655:
+
 		case 0x8705:
 		case 0x8712:
 		case 0x8718:
@@ -97,6 +101,7 @@ it87xx_detect(void)
 		case 0x8721:
 		case 0x8726:
 		case 0x8728:
+		case 0x8771:
 		case 0x8772:
 			result = chip_id;	// an ITE IT87xx was found.
 	}
@@ -180,7 +185,7 @@ ITESensorWrite(int regNum, uint8 value)
 	gISA->write_io_8(IT87_DATA_REG, value);
 }
 
-
+/*
 static inline uint8
 ITESensorReadValue(int regNum)
 {
@@ -189,7 +194,7 @@ ITESensorReadValue(int regNum)
 	}
 	return ITESensorRead(regNum);
 }
-
+*/
 
 //-----------------------------------------------------------------------------
 //	#pragma mark - utils funcs
@@ -248,27 +253,27 @@ it87_refresh(it87_sensors_data& data)
 	enter_mb_pnp_mode();
 	it87_config(true);
 
-	data.voltages[0] = ITESensorReadValue(IT87_REG_VIN0) * ADC_RES;
-	data.voltages[1] = ITESensorReadValue(IT87_REG_VIN1) * ADC_RES;
-	data.voltages[2] = ITESensorReadValue(IT87_REG_VIN2) * ADC_RES;
-	data.voltages[3] = ITESensorReadValue(IT87_REG_VIN3) * ADC_RES * 1.68;	// +5V. (6854.4 mV / 255)
-	data.voltages[4] = ITESensorReadValue(IT87_REG_VIN4) * ADC_RES * 4; 	// +12V. (16320 mV / 255)
+	data.voltages[0] = ITESensorRead(IT87_REG_VIN0) * ADC_RES;
+	data.voltages[1] = ITESensorRead(IT87_REG_VIN1) * ADC_RES;
+	data.voltages[2] = ITESensorRead(IT87_REG_VIN2) * ADC_RES;
+	data.voltages[3] = ITESensorRead(IT87_REG_VIN3) * ADC_RES * 1.68;	// +5V. (6854.4 mV / 255)
+	data.voltages[4] = ITESensorRead(IT87_REG_VIN4) * ADC_RES * 4; 	// +12V. (16320 mV / 255)
 	// This can either be -12V, or RAM Voltage
-	data.voltages[5] = ITESensorReadValue(IT87_REG_VIN5) * ADC_RES;
+	data.voltages[5] = ITESensorRead(IT87_REG_VIN5) * ADC_RES;
 	// This can either be -5V, or HT Voltage
-	data.voltages[6] = ITESensorReadValue(IT87_REG_VIN6) * ADC_RES;
-	data.voltages[7] = ITESensorReadValue(IT87_REG_VIN7) * ADC_RES * 1.68;	// +5V SB
-	data.voltages[8] = ITESensorReadValue(IT87_REG_VBAT) * ADC_RES;
+	data.voltages[6] = ITESensorRead(IT87_REG_VIN6) * ADC_RES;
+	data.voltages[7] = ITESensorRead(IT87_REG_VIN7) * ADC_RES * 1.68;	// +5V SB
+	data.voltages[8] = ITESensorRead(IT87_REG_VBAT) * ADC_RES;
 
-	data.temps[0] = TwosComplement(ITESensorReadValue(IT87_REG_TEMP0));
-	data.temps[1] = TwosComplement(ITESensorReadValue(IT87_REG_TEMP1));
-	data.temps[2] = TwosComplement(ITESensorReadValue(IT87_REG_TEMP2));
+	data.temps[0] = TwosComplement(ITESensorRead(IT87_REG_TEMP0));
+	data.temps[1] = TwosComplement(ITESensorRead(IT87_REG_TEMP1));
+	data.temps[2] = TwosComplement(ITESensorRead(IT87_REG_TEMP2));
 
 	if (gChipID == 0x8705 || gChipID == 0x8712) {
 		// Older chips (8-bit tachometers):
-		data.fans[0] = CountToRPM(ITESensorReadValue(IT87_REG_FAN_1));
-		data.fans[1] = CountToRPM(ITESensorReadValue(IT87_REG_FAN_2));
-		data.fans[2] = CountToRPM(ITESensorReadValue(IT87_REG_FAN_3));
+		data.fans[0] = CountToRPM(ITESensorRead(IT87_REG_FAN_1));
+		data.fans[1] = CountToRPM(ITESensorRead(IT87_REG_FAN_2));
+		data.fans[2] = CountToRPM(ITESensorRead(IT87_REG_FAN_3));
 	} else {
 		data.fans[0] = Count16ToRPM(
 			ITESensorRead(IT87_REG_FAN_1) | ITESensorRead(IT87_REG_FAN_1_EXT) << 8);
