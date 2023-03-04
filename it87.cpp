@@ -226,19 +226,19 @@ Count16ToRPM(uint16 count)
 
 
 static void
-OutInt(void* buff, size_t* len, const char format[], int value)
+OutInt(void* buffer, size_t* length, const char format[], int value)
 {
-	sprintf((char*) buff + *len, format, value);
-	*len = strlen((char*) buff);
+	sprintf((char*) buffer + *length, format, value);
+	*length = strlen((char*) buffer);
 }
 
 
 static void
-OutFloat(void* buffer, size_t* numBytes, const char format[], uint value, uint scale)
+OutFloat(void* buffer, size_t* length, const char format[], uint value, uint scale)
 {
-	char* str = (char*) buffer + *numBytes;
+	char* str = (char*) buffer + *length;
 	sprintf(str, format, (value / scale), (value % scale));
-	*numBytes = strlen((char*) buffer);
+	*length = strlen((char*) buffer);
 }
 
 
@@ -344,47 +344,52 @@ device_control(void* cookie, uint32 operation, void* args, size_t length)
 static status_t
 device_read(void* cookie, off_t position, void* buffer, size_t* num_bytes)
 {
-	if (*num_bytes < 1)
-		return B_IO_ERROR;
+	// 17*9 + 16*3 + 16*5. For volts, temps ("°" takes 2 bytes), and fans, respectively.
+	#define DATA_SIZE 281
+
+	if (*num_bytes < DATA_SIZE) {
+		*num_bytes = DATA_SIZE; // attempt to communicate how many bytes we actually need.
+		return ERANGE;
+	}
 
 	if (position) {
 		*num_bytes = 0;
 		return B_OK;
 	}
 
-	*num_bytes = 0;
-
+	char buf[DATA_SIZE];
+	size_t bytes_written = 0;
 	it87_sensors_data data;
-/*
-	status_t status = device_control(cookie, IT87_SENSORS_READ, &data, 0);
-	if (status != B_OK)
-		return status;
-*/
+
 	it87_refresh(data);
 
-	OutFloat(buffer, num_bytes, "VIN0 : %3d.%03d V\n", data.voltages[0], 1000);
-	OutFloat(buffer, num_bytes, "VIN1 : %3d.%03d V\n", data.voltages[1], 1000);
-	OutFloat(buffer, num_bytes, "VIN2 : %3d.%03d V\n", data.voltages[2], 1000);
-	OutFloat(buffer, num_bytes, "VIN3 : %3d.%03d V\n", data.voltages[3], 1000);
-	OutFloat(buffer, num_bytes, "VIN4 : %3d.%03d V\n", data.voltages[4], 1000);
-	OutFloat(buffer, num_bytes, "VIN5 : %3d.%03d V\n", data.voltages[5], 1000);
-	OutFloat(buffer, num_bytes, "VIN6 : %3d.%03d V\n", data.voltages[6], 1000);
-	OutFloat(buffer, num_bytes, "VIN7 : %3d.%03d V\n", data.voltages[7], 1000);
-	OutFloat(buffer, num_bytes, "VBAT : %3d.%03d V\n", data.voltages[8], 1000);
+	OutFloat(&buf, &bytes_written, "VIN0 : %3d.%03d V\n", data.voltages[0], 1000);
+	OutFloat(&buf, &bytes_written, "VIN1 : %3d.%03d V\n", data.voltages[1], 1000);
+	OutFloat(&buf, &bytes_written, "VIN2 : %3d.%03d V\n", data.voltages[2], 1000);
+	OutFloat(&buf, &bytes_written, "VIN3 : %3d.%03d V\n", data.voltages[3], 1000);
+	OutFloat(&buf, &bytes_written, "VIN4 : %3d.%03d V\n", data.voltages[4], 1000);
+	OutFloat(&buf, &bytes_written, "VIN5 : %3d.%03d V\n", data.voltages[5], 1000);
+	OutFloat(&buf, &bytes_written, "VIN6 : %3d.%03d V\n", data.voltages[6], 1000);
+	OutFloat(&buf, &bytes_written, "VIN7 : %3d.%03d V\n", data.voltages[7], 1000);
+	OutFloat(&buf, &bytes_written, "VBAT : %3d.%03d V\n", data.voltages[8], 1000);
 
-	OutInt(buffer, num_bytes, "TEMP0: %4d °C\n", data.temps[0]);
-	OutInt(buffer, num_bytes, "TEMP1: %4d °C\n", data.temps[1]);
-	OutInt(buffer, num_bytes, "TEMP2: %4d °C\n", data.temps[2]);
+	OutInt(&buf, &bytes_written, "TEMP0: %4d °C\n", data.temps[0]);
+	OutInt(&buf, &bytes_written, "TEMP1: %4d °C\n", data.temps[1]);
+	OutInt(&buf, &bytes_written, "TEMP2: %4d °C\n", data.temps[2]);
 
-	OutInt(buffer, num_bytes, "FAN1 : %4d RPM\n", data.fans[0]);
-	OutInt(buffer, num_bytes, "FAN2 : %4d RPM\n", data.fans[1]);
-	OutInt(buffer, num_bytes, "FAN3 : %4d RPM\n", data.fans[2]);
+	OutInt(&buf, &bytes_written, "FAN1 : %4d RPM\n", data.fans[0]);
+	OutInt(&buf, &bytes_written, "FAN2 : %4d RPM\n", data.fans[1]);
+	OutInt(&buf, &bytes_written, "FAN3 : %4d RPM\n", data.fans[2]);
 
 	if (gChipID != 0x8705 && gChipID != 0x8712) {
-		OutInt(buffer, num_bytes, "FAN4 : %4d RPM\n", data.fans[3]);
-		OutInt(buffer, num_bytes, "FAN5 : %4d RPM\n", data.fans[4]);
+		OutInt(&buf, &bytes_written, "FAN4 : %4d RPM\n", data.fans[3]);
+		OutInt(&buf, &bytes_written, "FAN5 : %4d RPM\n", data.fans[4]);
 	}
 
+	if (user_memcpy(buffer, &buf, sizeof(buf)) != B_OK)
+		return B_BAD_ADDRESS;
+
+	*num_bytes = bytes_written;
 	return B_OK;
 }
 
